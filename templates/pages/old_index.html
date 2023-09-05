@@ -1,9 +1,5 @@
-<!doctype html>
-<html>
-  <head>
-    <title>{{.Title}}</title>
-  </head>
-  <body>
+{{define content}}
+  <main>
     <h1>You are viewing {{.Title}}</h1>
     <p>Here is a list of all the pages</p>
     <ul>
@@ -11,5 +7,5 @@
       <li><a href="/blog">Blog</a></li>
       <li><a href="/contact">Contact</a></li>
     </ul>
-  </body>
-</html>
+  </main>
+{{end}}
