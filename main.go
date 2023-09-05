@@ -21,20 +21,26 @@ type TemplateRenderer struct {
 	templatePath string
 }
 
+
 func NewTemplateRenderer(templatePath string) *TemplateRenderer {
 	return &TemplateRenderer{
 		templatePath: templatePath,
 	}
 }
 
-func (tr *TemplateRenderer) Render(w http.ResponseWriter, tmpl string, data interface{}, ctx context.Context) error {
+func (tr *TemplateRenderer) Render(w http.ResponseWriter, page string, layout string, data interface{}, ctx context.Context) error {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	t, err := template.ParseFiles(path.Join(tr.templatePath, tmpl))
+
+	// Build the full path of the layout and the page.
+	layoutFile := path.Join(tr.templatePath, "layouts", layout)
+	pageFile := path.Join(tr.templatePath, "pages", page)
+
+	t, err := template.ParseFiles(layoutFile, pageFile)
 	if err != nil {
 		return err
 	}
 
-	return t.Execute(w, data)
+	return t.ExecuteTemplate(w, "base", data)
 }
 
 type PrettyHandlerOptions struct {
@@ -134,7 +140,7 @@ func (I *IndexHandler) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 	head, req.URL.Path = ShiftPath(req.URL.Path)
 
 	if head == "" {
-		I.logger.Info("request", slog.String("method", req.Method), slog.String("path", req.URL.Path), slog.String("location", "user list route"))
+		I.logger.Info("request", slog.String("method", req.Method), slog.String("path", req.URL.Path), slog.String("location", "index route"))
 	}
 
 	data := struct {
@@ -145,8 +151,12 @@ func (I *IndexHandler) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 
 	switch req.Method {
 	case "GET":
-		I.renderer.Render(res, "index.html", data, req.Context())
-		return
+        err := I.renderer.Render(res, "index.html", "base.html", data, req.Context())
+        if err != nil {
+          I.logger.Error("Render error", slog.String("error", err.Error()))
+          http.Error(res, "Internal Server Error", http.StatusInternalServerError)
+		  return
+        }
 	default:
 		I.logger.Info("request", slog.String("method", req.Method), slog.String("path", req.URL.Path))
 		http.Error(res, "Only GET is supported", http.StatusMethodNotAllowed)
@@ -174,7 +184,7 @@ func (A *AboutHandler) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 
 	switch req.Method {
 	case "GET":
-		A.renderer.Render(res, "about.html", data, req.Context())
+		A.renderer.Render(res, "about.html", "base.html", data, req.Context())
 		return
 	default:
 		A.logger.Info("request", slog.String("method", req.Method), slog.String("path", req.URL.Path))
@@ -194,14 +204,9 @@ func (B *BlogHandler) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 	if head == "" {
 		B.logger.Info("request", slog.String("method", req.Method), slog.String("path", req.URL.Path), slog.String("location", "user list route"))
 
-		data := struct {
-			Title string
-		}{
-			Title: "Blog Page",
-		}
 		switch req.Method {
 		case "GET":
-			B.renderer.Render(res, "blog.html", data, req.Context())
+			B.renderer.Render(res, "blog.html", "base.html", nil, req.Context())
 			return
 		default:
 			B.logger.Info("request", slog.String("method", req.Method), slog.String("path", req.URL.Path))
@@ -209,15 +214,21 @@ func (B *BlogHandler) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	id, err := strconv.Atoi(head)
-	if err != nil {
-		B.logger.Info("request", slog.String("method", req.Method), slog.String("path", req.URL.Path))
-		http.Error(res, fmt.Sprintf("Invalid user id %q", head), http.StatusBadRequest)
-		return
-	}
+    content, err := loadBlogContent(head)
+    if err != nil {
+      B.logger.Error("loadBlogContent error", slog.String("error", err.Error()))
+      http.Error(res, "blog content not found", http.StatusNotFound)
+    }
 
-	B.logger.Info("request", slog.String("method", req.Method), slog.String("path", req.URL.Path), slog.Int("Blog ID", id))
+    data := struct {
+        Title string
+        Content string
+    }{
+        Title: "Blog Page",
+        Content: content,
+    }
 
+    B.renderer.Render(res, "blog.html", "base.html", data, req.Context())
 }
 
 type ContactHandler struct {
@@ -243,7 +254,7 @@ func (C *ContactHandler) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 
 	switch req.Method {
 	case "GET":
-		C.renderer.Render(res, "blog.html", data, req.Context())
+		C.renderer.Render(res, "blog.html","base.html", data, req.Context())
 		return
 	default:
 		C.logger.Info("request", slog.String("method", req.Method), slog.String("path", req.URL.Path))
@@ -302,3 +313,4 @@ func ShiftPath(p string) (head, tail string) {
 
 	return p[1:i], p[i:]
 }
+
