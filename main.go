@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"path"
-	"strconv"
 	"strings"
 
 	"github.com/fatih/color"
@@ -20,7 +19,6 @@ import (
 type TemplateRenderer struct {
 	templatePath string
 }
-
 
 func NewTemplateRenderer(templatePath string) *TemplateRenderer {
 	return &TemplateRenderer{
@@ -151,12 +149,12 @@ func (I *IndexHandler) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 
 	switch req.Method {
 	case "GET":
-        err := I.renderer.Render(res, "index.html", "base.html", data, req.Context())
-        if err != nil {
-          I.logger.Error("Render error", slog.String("error", err.Error()))
-          http.Error(res, "Internal Server Error", http.StatusInternalServerError)
-		  return
-        }
+		err := I.renderer.Render(res, "index.html", "base.html", data, req.Context())
+		if err != nil {
+			I.logger.Error("Render error", slog.String("error", err.Error()))
+			http.Error(res, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
 	default:
 		I.logger.Info("request", slog.String("method", req.Method), slog.String("path", req.URL.Path))
 		http.Error(res, "Only GET is supported", http.StatusMethodNotAllowed)
@@ -195,18 +193,38 @@ func (A *AboutHandler) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 type BlogHandler struct {
 	logger   *slog.Logger
 	renderer *TemplateRenderer
+	parser   *LIGMA
 }
 
 func (B *BlogHandler) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 	var head string
 	head, req.URL.Path = ShiftPath(req.URL.Path)
 
+    err := B.parser.buildBlogList()
+    if err != nil {
+        B.logger.Error("buildBlogList error", slog.String("error", err.Error()))
+    }
+
+	blogdata := struct {
+		Title    string
+		BlogList []string
+	}{
+		Title:    "Blog Page",
+		BlogList: B.parser.Slugs,
+	}
+
 	if head == "" {
-		B.logger.Info("request", slog.String("method", req.Method), slog.String("path", req.URL.Path), slog.String("location", "user list route"))
+		B.logger.Info(
+			"request",
+			slog.String("method", req.Method),
+			slog.String("path", req.URL.Path),
+			slog.String("location", "blog list route"),
+			slog.String("bloglist", strings.Join(B.parser.Slugs, ", ")),
+		)
 
 		switch req.Method {
 		case "GET":
-			B.renderer.Render(res, "blog.html", "base.html", nil, req.Context())
+			B.renderer.Render(res, "blog.html", "base.html", blogdata, req.Context())
 			return
 		default:
 			B.logger.Info("request", slog.String("method", req.Method), slog.String("path", req.URL.Path))
@@ -214,21 +232,21 @@ func (B *BlogHandler) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-    content, err := loadBlogContent(head)
-    if err != nil {
-      B.logger.Error("loadBlogContent error", slog.String("error", err.Error()))
-      http.Error(res, "blog content not found", http.StatusNotFound)
-    }
+	content, err := B.parser.loadBlogContent(head)
+	if err != nil {
+		B.logger.Error("loadBlogContent error", slog.String("error", err.Error()))
+		http.Error(res, "blog content not found", http.StatusNotFound)
+	}
 
-    data := struct {
-        Title string
-        Content string
-    }{
-        Title: "Blog Page",
-        Content: content,
-    }
+	data := struct {
+		Title   string
+		Content string
+	}{
+		Title:   "Blog Page",
+		Content: content,
+	}
 
-    B.renderer.Render(res, "blog.html", "base.html", data, req.Context())
+	B.renderer.Render(res, "blog.html", "base.html", data, req.Context())
 }
 
 type ContactHandler struct {
@@ -254,7 +272,7 @@ func (C *ContactHandler) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 
 	switch req.Method {
 	case "GET":
-		C.renderer.Render(res, "blog.html","base.html", data, req.Context())
+		C.renderer.Render(res, "blog.html", "base.html", data, req.Context())
 		return
 	default:
 		C.logger.Info("request", slog.String("method", req.Method), slog.String("path", req.URL.Path))
@@ -280,9 +298,11 @@ func main() {
 		logger,
 		renderer,
 	}
+	ligma := NewLIGMA()
 	blogHandler := &BlogHandler{
 		logger,
 		renderer,
+		ligma,
 	}
 	contactHandler := &ContactHandler{
 		logger,
@@ -313,4 +333,3 @@ func ShiftPath(p string) (head, tail string) {
 
 	return p[1:i], p[i:]
 }
-
